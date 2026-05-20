@@ -144,17 +144,18 @@
     .icon-btn {
       background: none;
       border: none;
-      color: var(--text-2);
-      font-size: 1.2rem;
+      color: var(--text-3);
+      font-size: 1rem;
       cursor: pointer;
       padding: 8px 12px;
       border-radius: 8px;
-      transition: color 0.15s, background 0.15s;
+      transition: color 0.15s, opacity 0.15s;
       line-height: 1;
       min-width: 40px;
       min-height: 40px;
+      opacity: 0.55;
     }
-    .icon-btn:hover, .icon-btn.active { color: var(--text); background: var(--elevated); }
+    .icon-btn:hover, .icon-btn.active { color: var(--text-2); opacity: 1; }
 
     .lib-body {
       flex: 1;
@@ -722,7 +723,8 @@
   </div>
 
   <div class="controls">
-    <button class="ctrl-btn" onclick="skipBack()" title="Back (←)">←</button>
+    <button class="ctrl-btn" onclick="skipBack()" title="Previous sentence (←)">←</button>
+    <button class="ctrl-btn" onclick="cycleFontSize()" title="Text size" style="font-family:'Atkinson Hyperlegible',sans-serif;font-size:1.15rem;font-weight:700;letter-spacing:-0.02em">Aa</button>
   </div>
 </div>
 
@@ -1115,6 +1117,16 @@ function onFontSize(val) {
   el('size-display').textContent = label;
 }
 
+const FONT_PRESETS = [0.8, 1.0, 1.25, 1.5];
+function cycleFontSize() {
+  const cur = parseFloat(localStorage.getItem('sr-font-scale') || '1');
+  // Find next preset larger than cur (with a small epsilon), wrap to smallest
+  let next = FONT_PRESETS.find(p => p > cur + 0.01);
+  if (next === undefined) next = FONT_PRESETS[0];
+  el('size-slider').value = next;
+  onFontSize(next);
+}
+
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  Reader engine                                                           ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
@@ -1189,7 +1201,40 @@ function togglePlay() {
   if (S.playing) tick(); else { clearTimer(); scheduleSaveProgress(); }
 }
 
-function skipBack() { clearTimer(); S.idx = Math.max(0, S.idx - Math.max(1, Math.round(S.wpm * 10 / 60))); if (S.playing) tick(); else refreshView(); scheduleSaveProgress(); }
+// Common abbreviations that end in "." but aren't sentence ends
+const ABBREVS = new Set([
+  'Mr.','Mrs.','Ms.','Dr.','St.','Jr.','Sr.','Prof.','Rev.',
+  'etc.','vs.','e.g.','i.e.','No.','Co.','Ltd.','Inc.',
+  'Capt.','Lt.','Col.','Gen.','Hon.','Lady.'
+]);
+function isSentenceEnd(word) {
+  if (!word) return false;
+  if (!/[.!?]["')\]]?$/.test(word)) return false;
+  if (ABBREVS.has(word)) return false;
+  // Single-letter initials like "A." or "J."
+  if (/^[A-Z]\.$/.test(word)) return false;
+  return true;
+}
+
+function skipBack() {
+  // Each press: jump to the beginning of the previous sentence
+  clearTimer();
+  if (S.idx <= 0) { S.idx = 0; refreshView(); scheduleSaveProgress(); return; }
+
+  // Walk back to find the end of the previous sentence
+  let prevEnd = S.idx - 1;
+  while (prevEnd > 0 && !isSentenceEnd(S.words[prevEnd])) prevEnd--;
+
+  // Walk back further to find the end of the sentence BEFORE that
+  let prevPrevEnd = prevEnd - 1;
+  while (prevPrevEnd > 0 && !isSentenceEnd(S.words[prevPrevEnd])) prevPrevEnd--;
+
+  // Start of the previous sentence is one word after prevPrevEnd
+  S.idx = prevPrevEnd > 0 ? prevPrevEnd + 1 : 0;
+
+  if (S.playing) tick(); else refreshView();
+  scheduleSaveProgress();
+}
 
 function refreshView() {
   if (S.mode === 'rsvp') { displayRsvpWord(S.words[S.idx] || '·'); displayRsvpContext(); updateRsvpStats(); }
