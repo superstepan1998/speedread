@@ -1134,6 +1134,7 @@ function toggleSettings() {
   const panel = el('settings-panel');
   const open = panel.classList.toggle('open');
   document.querySelectorAll('#settings-btn, #lib-settings-btn').forEach(b => b?.classList.toggle('active', open));
+  if (open && S.playing) { clearTimer(); S.playing = false; }
 }
 function toggleLibSettings() { toggleSettings(); }
 
