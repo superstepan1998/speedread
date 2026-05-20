@@ -17,6 +17,23 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* Strip all default button styling so iOS doesn't add its own */
+    button {
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      border: none;
+      font-family: inherit;
+      color: inherit;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+    }
+    select {
+      -webkit-appearance: none;
+      appearance: none;
+      font-family: inherit;
+    }
+
     /* ── Themes ──────────────────────────────────────────────────── */
     :root, [data-theme="night"] {
       --bg:          #0d0d12;

@@ -1,8 +1,6 @@
-// SpeedRead service worker — basic offline cache
-const CACHE = 'speedread-v1';
+// SpeedRead service worker — network-first for HTML, cache-first for static assets
+const CACHE = 'speedread-v3';
 const ASSETS = [
-  './',
-  './index.html',
   './manifest.json',
   './icon.svg',
   './icon-192.png',
@@ -14,7 +12,7 @@ const ASSETS = [
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE)
-      .then(c => c.addAll(ASSETS).catch(() => {})) // ignore failed cross-origin
+      .then(c => c.addAll(ASSETS).catch(() => {}))
       .then(() => self.skipWaiting())
   );
 });
@@ -30,15 +28,36 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  // Don't cache the bundled sample epub (too large, optional)
   if (req.url.includes('pride-and-prejudice.epub')) return;
 
+  const isHTML = req.mode === 'navigate' ||
+                 (req.headers.get('accept') || '').includes('text/html');
+
+  if (isHTML) {
+    // Network-first: always try fresh HTML, fall back to cache offline
+    e.respondWith(
+      fetch(req).then(res => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(req, clone));
+        }
+        return res;
+      }).catch(() => caches.match(req).then(hit => hit || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // Cache-first for everything else (assets, fonts, JSZip)
   e.respondWith(
     caches.match(req).then(hit => {
       if (hit) return hit;
       return fetch(req).then(res => {
-        // Cache successful same-origin and known CDN responses
-        if (res && res.status === 200 && (req.url.startsWith(self.location.origin) || req.url.includes('cdnjs.cloudflare.com') || req.url.includes('fonts.googleapis.com') || req.url.includes('fonts.gstatic.com'))) {
+        if (res && res.status === 200 && (
+          req.url.startsWith(self.location.origin) ||
+          req.url.includes('cdnjs.cloudflare.com') ||
+          req.url.includes('fonts.googleapis.com') ||
+          req.url.includes('fonts.gstatic.com')
+        )) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(req, clone));
         }
