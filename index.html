@@ -341,6 +341,33 @@
       position: relative;
     }
 
+    /* ── Sync UI ─────────────────────────────────────────────────── */
+    .sync-token-input {
+      width: 100%;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.78rem;
+      padding: 8px 10px;
+      font-family: monospace;
+      margin-top: 6px;
+      -webkit-appearance: none;
+    }
+    .sync-token-input::placeholder { color: var(--text-3); }
+    .sync-token-input:focus { outline: none; border-color: var(--accent); }
+    .sync-hint {
+      font-size: 0.70rem;
+      color: var(--text-3);
+      margin-top: 5px;
+      line-height: 1.45;
+    }
+    .sync-hint a { color: var(--accent); text-decoration: none; }
+    #sync-status { font-size: 0.72rem; }
+    .sync-ok      { color: var(--accent); }
+    .sync-error   { color: var(--pivot); }
+    .sync-syncing { color: var(--text-3); }
+
     /* ── Settings panel ──────────────────────────────────────────── */
     #settings-panel {
       display: none;
@@ -713,6 +740,23 @@
     <div class="s-header"><span class="s-label">Theme</span></div>
     <div class="theme-row" id="theme-row"></div>
   </div>
+
+  <div class="s-sep"></div>
+
+  <!-- Sync -->
+  <div class="s-group">
+    <div class="s-header">
+      <span class="s-label">Sync</span>
+      <span id="sync-status"></span>
+    </div>
+    <input type="password" id="sync-token-input" class="sync-token-input"
+           placeholder="GitHub token (gist scope)"
+           oninput="onSyncTokenChange(this.value)">
+    <div class="sync-hint">
+      Get a token at <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>
+      → New classic token → tick <b>gist</b>. Paste here on every device once.
+    </div>
+  </div>
 </div>
 
 <!-- READER -->
@@ -807,9 +851,10 @@ async function updateBook(id, fields) {
   return dbOp('books', 'readwrite', os => os.put(book));
 }
 async function saveProgress(bookId, chapterIdx, wordIdx, totalWords) {
-  return dbOp('progress', 'readwrite', os => os.put({
+  await dbOp('progress', 'readwrite', os => os.put({
     bookId, chapterIdx, wordIdx, totalWords, updatedAt: Date.now()
   }));
+  schedulePush();
 }
 async function getProgress(bookId) { return dbOp('progress', 'readonly', os => os.get(bookId)); }
 
@@ -1355,6 +1400,146 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  GitHub Gist Sync                                                        ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+const GIST_FILENAME = 'speedread-sync.json';
+let _syncDebounce = null;
+
+function makeStableId(title) {
+  return (title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'book';
+}
+
+function getSyncToken() { return localStorage.getItem('sr-gist-token') || ''; }
+function getGistId()    { return localStorage.getItem('sr-gist-id')    || ''; }
+
+function setSyncStatus(cls, msg) {
+  const s = el('sync-status');
+  if (!s) return;
+  s.textContent = msg;
+  s.className = 'sync-' + cls;
+}
+
+async function gistAPI(path, opts = {}) {
+  const res = await fetch('https://api.github.com' + path, {
+    ...opts,
+    headers: {
+      'Authorization': 'token ' + getSyncToken(),
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      ...(opts.headers || {})
+    }
+  });
+  if (!res.ok) throw new Error('GitHub ' + res.status);
+  return res.json();
+}
+
+async function resolveGistId() {
+  let id = getGistId();
+  if (id) return id;
+  // search existing gists for our file
+  const list = await gistAPI('/gists?per_page=100');
+  const found = list.find(g => g.files && g.files[GIST_FILENAME]);
+  if (found) { localStorage.setItem('sr-gist-id', found.id); return found.id; }
+  // create new private gist
+  const created = await gistAPI('/gists', {
+    method: 'POST',
+    body: JSON.stringify({
+      description: 'SpeedRead sync',
+      public: false,
+      files: { [GIST_FILENAME]: { content: '{}' } }
+    })
+  });
+  localStorage.setItem('sr-gist-id', created.id);
+  return created.id;
+}
+
+async function pullFromGist() {
+  if (!getSyncToken()) return;
+  try {
+    setSyncStatus('syncing', 'Syncing…');
+    const gistId = await resolveGistId();
+    const gist   = await gistAPI('/gists/' + gistId);
+    const remote = JSON.parse(gist.files[GIST_FILENAME]?.content || '{}');
+    const books  = await listBooks();
+    for (const [sid, rp] of Object.entries(remote)) {
+      const book = books.find(b => makeStableId(b.title) === sid);
+      if (!book) continue;
+      const local = await getProgress(book.id);
+      if (!local || rp.updatedAt > local.updatedAt) {
+        await dbOp('progress', 'readwrite', os => os.put({
+          bookId: book.id,
+          chapterIdx: rp.chapterIdx,
+          wordIdx: rp.wordIdx,
+          totalWords: rp.totalWords,
+          updatedAt: rp.updatedAt
+        }));
+      }
+    }
+    setSyncStatus('ok', 'Synced ' + timeAgo(Date.now()));
+    localStorage.setItem('sr-last-sync', Date.now());
+    renderLibrary();
+  } catch(e) {
+    setSyncStatus('error', 'Sync failed');
+    console.warn('Gist pull:', e);
+  }
+}
+
+async function pushToGist() {
+  if (!getSyncToken()) return;
+  try {
+    setSyncStatus('syncing', 'Syncing…');
+    const gistId = await resolveGistId();
+    const gist   = await gistAPI('/gists/' + gistId);
+    const remote = JSON.parse(gist.files[GIST_FILENAME]?.content || '{}');
+    const books  = await listBooks();
+    for (const book of books) {
+      const prog = await getProgress(book.id);
+      if (!prog) continue;
+      const sid = makeStableId(book.title);
+      if (!remote[sid] || prog.updatedAt > (remote[sid].updatedAt || 0)) {
+        remote[sid] = {
+          title: book.title,
+          chapterIdx: prog.chapterIdx,
+          wordIdx: prog.wordIdx,
+          totalWords: prog.totalWords,
+          updatedAt: prog.updatedAt
+        };
+      }
+    }
+    await gistAPI('/gists/' + gistId, {
+      method: 'PATCH',
+      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(remote, null, 2) } } })
+    });
+    setSyncStatus('ok', 'Synced ' + timeAgo(Date.now()));
+    localStorage.setItem('sr-last-sync', Date.now());
+  } catch(e) {
+    setSyncStatus('error', 'Sync failed');
+    console.warn('Gist push:', e);
+  }
+}
+
+function schedulePush() {
+  if (!getSyncToken()) return;
+  clearTimeout(_syncDebounce);
+  _syncDebounce = setTimeout(pushToGist, 4000);
+}
+
+function onSyncTokenChange(val) {
+  const token = val.trim();
+  if (token) {
+    localStorage.setItem('sr-gist-token', token);
+  } else {
+    localStorage.removeItem('sr-gist-token');
+    localStorage.removeItem('sr-gist-id');
+    setSyncStatus('', '');
+    return;
+  }
+  localStorage.removeItem('sr-gist-id'); // re-discover gist with new token
+  pullFromGist();
+}
+
 // ── Swipe gesture (right = back one sentence) ────────────────────────────
 (function() {
   let tx = 0, ty = 0, active = false;
@@ -1411,6 +1596,15 @@ if (savedPt) { el('size-slider').value = savedPt; onFontSize(savedPt); }
 else { onFontSize(32); }
 
 renderLibrary();
+
+// Restore sync token input + pull on start
+const savedToken = getSyncToken();
+if (savedToken) {
+  el('sync-token-input').value = savedToken;
+  const lastSync = localStorage.getItem('sr-last-sync');
+  if (lastSync) setSyncStatus('ok', 'Synced ' + timeAgo(parseInt(lastSync)));
+  pullFromGist();
+}
 
 // Register service worker (PWA)
 if ('serviceWorker' in navigator) {
