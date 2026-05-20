@@ -1041,7 +1041,10 @@ async function openBook(id) {
 
     const progress = await getProgress(id);
     const startCh = progress?.chapterIdx ?? 0;
-    const startWord = progress?.wordIdx ?? 0;
+    // wordIdx is stored as global (across all chapters); convert to chapter-local
+    const globalWordIdx = progress?.wordIdx ?? 0;
+    const wordsBefore = chapters.slice(0, startCh).reduce((sum, ch) => sum + ch.words.length, 0);
+    const startWord = Math.max(0, globalWordIdx - wordsBefore);
 
     loadChapter(startCh, startWord);
 
@@ -1087,6 +1090,9 @@ async function loadSample() {
     if (!res.ok) throw new Error('Sample not available');
     const blob = await res.blob();
     const { title } = await parseEpub(blob);
+    const existing = await listBooks();
+    const dup = existing.find(b => b.title === title);
+    if (dup) { el('loading').style.display = 'none'; await openBook(dup.id); return; }
     const book = await addBookToDB(blob, title);
     await openBook(book.id);
   } catch (err) {
@@ -1108,6 +1114,9 @@ async function loadFile(file) {
   el('loading-text').textContent = 'Adding book…';
   try {
     const { title } = await parseEpub(file);
+    const existing = await listBooks();
+    const dup = existing.find(b => b.title === title);
+    if (dup) { el('loading').style.display = 'none'; await openBook(dup.id); return; }
     const book = await addBookToDB(file, title);
     await openBook(book.id);
   } catch (err) {
@@ -1202,7 +1211,7 @@ function clearTimer() { if (S.timer) { clearTimeout(S.timer); S.timer = null; } 
 let _saveTimer = null;
 function scheduleSaveProgress() {
   if (!S.bookId) return;
-  if (_saveTimer) return;
+  clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     _saveTimer = null;
     const totalWords = S.chapters.reduce((sum, ch) => sum + ch.words.length, 0);
@@ -1313,6 +1322,7 @@ function highlightChunk(idx) {
 
 function adjChunk(d) {
   S.chunkSize = Math.max(1, Math.min(10, S.chunkSize + d));
+  localStorage.setItem('sr-chunk-size', S.chunkSize);
   el('chunk-val').textContent = S.chunkSize + ' words';
   el('chunk-fill').style.width = ((S.chunkSize - 1) / 9 * 100) + '%';
   if (S.mode === 'chunk') highlightChunk(S.idx);
@@ -1320,6 +1330,7 @@ function adjChunk(d) {
 
 function setMode(mode) {
   clearTimer(); S.playing = false; S.mode = mode;
+  localStorage.setItem('sr-mode', mode);
   el('btn-rsvp').classList.toggle('active',  mode === 'rsvp');
   el('btn-chunk').classList.toggle('active', mode === 'chunk');
   el('rsvp-container').style.display  = mode === 'rsvp'  ? 'flex'  : 'none';
@@ -1347,6 +1358,7 @@ function updateRsvpStats() {
 function onSpeedChange(val) {
   S.wpm = parseInt(val);
   el('wpm-display').textContent = S.wpm + ' WPM';
+  localStorage.setItem('sr-wpm', S.wpm);
   updateRsvpStats();
   if (S.playing) { clearTimer(); tick(); }
 }
@@ -1595,6 +1607,25 @@ if (localStorage.getItem('sr-font-scale') && !localStorage.getItem('sr-font-pt')
 const savedPt = localStorage.getItem('sr-font-pt');
 if (savedPt) { el('size-slider').value = savedPt; onFontSize(savedPt); }
 else { onFontSize(32); }
+
+// Restore WPM
+const savedWpm = parseInt(localStorage.getItem('sr-wpm') || '300');
+S.wpm = savedWpm;
+el('speed-slider').value = savedWpm;
+el('wpm-display').textContent = savedWpm + ' WPM';
+
+// Restore chunk size
+const savedChunk = parseInt(localStorage.getItem('sr-chunk-size') || '3');
+S.chunkSize = savedChunk;
+el('chunk-val').textContent = savedChunk + ' words';
+el('chunk-fill').style.width = ((savedChunk - 1) / 9 * 100) + '%';
+
+// Restore reading mode
+const savedMode = localStorage.getItem('sr-mode') || 'rsvp';
+S.mode = savedMode;
+el('btn-rsvp').classList.toggle('active',  savedMode === 'rsvp');
+el('btn-chunk').classList.toggle('active', savedMode === 'chunk');
+el('chunk-group').style.display = savedMode === 'chunk' ? 'block' : 'none';
 
 renderLibrary();
 
