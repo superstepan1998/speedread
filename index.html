@@ -162,7 +162,7 @@
       background: none;
       border: none;
       color: var(--text-3);
-      font-size: 1rem;
+      font-size: 1.3rem;
       cursor: pointer;
       padding: 8px 12px;
       border-radius: 8px;
@@ -171,6 +171,7 @@
       min-width: 40px;
       min-height: 40px;
       opacity: 0.55;
+      letter-spacing: 0.05em;
     }
     .icon-btn:hover, .icon-btn.active { color: var(--text-2); opacity: 1; }
 
@@ -628,7 +629,7 @@
     <div class="lib-title">SpeedRead</div>
     <div class="lib-actions">
       <button class="icon-btn" id="lib-add-btn" onclick="document.getElementById('file-input').click()" title="Add book">+</button>
-      <button class="icon-btn" id="lib-settings-btn" onclick="toggleLibSettings()" title="Settings">⚙&#xFE0E;</button>
+      <button class="icon-btn" id="lib-settings-btn" onclick="toggleLibSettings()" title="Settings">···</button>
     </div>
   </div>
 
@@ -762,7 +763,7 @@
 <!-- READER -->
 <div id="reader-screen">
   <div class="top-bar">
-    <button class="icon-btn" id="settings-btn" onclick="toggleSettings()" title="Settings" style="margin-left:auto">⚙&#xFE0E;</button>
+    <button class="icon-btn" id="settings-btn" onclick="toggleSettings()" title="Settings" style="margin-left:auto">···</button>
   </div>
 
   <div class="reading-area">
