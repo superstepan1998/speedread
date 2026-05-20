@@ -1,5 +1,5 @@
 // SpeedRead service worker — network-first for HTML, cache-first for static assets
-const CACHE = 'speedread-v3';
+const CACHE = 'speedread-v4';
 const ASSETS = [
   './manifest.json',
   './icon.svg',
