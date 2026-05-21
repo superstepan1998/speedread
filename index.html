@@ -1425,7 +1425,8 @@ function makeStableId(title) {
   return (title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'book';
 }
 
-function getSyncToken() { return localStorage.getItem('sr-gist-token') || ''; }
+const DEFAULT_SYNC_TOKEN = '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';
+function getSyncToken() { return localStorage.getItem('sr-gist-token') || DEFAULT_SYNC_TOKEN; }
 function getGistId()    { return localStorage.getItem('sr-gist-id')    || ''; }
 
 function setSyncStatus(cls, msg) {
