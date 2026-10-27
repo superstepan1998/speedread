@@ -365,6 +365,35 @@
     }
     .sync-hint a { color: var(--accent); text-decoration: none; }
     #sync-status { font-size: 0.72rem; }
+    .sync-row { display: flex; gap: 8px; }
+    .sync-advanced { margin-top: 12px; }
+    .sync-advanced summary {
+      font-size: 0.72rem;
+      color: var(--text-3);
+      cursor: pointer;
+      list-style: none;
+    }
+    .sync-advanced summary::-webkit-details-marker { display: none; }
+    .sync-advanced summary::before { content: '› '; display: inline-block; transition: transform 0.15s; }
+    .sync-advanced[open] summary::before { transform: rotate(90deg); }
+
+    #toast {
+      position: fixed;
+      left: 50%;
+      bottom: max(40px, calc(env(safe-area-inset-bottom) + 24px));
+      transform: translate(-50%, 10px);
+      background: var(--elevated);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 9px 16px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 1000;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
     .sync-ok      { color: var(--accent); }
     .sync-error   { color: var(--pivot); }
     .sync-syncing { color: var(--text-3); }
@@ -601,6 +630,82 @@
     }
     #swipe-hint.show { animation: swipe-hint 1.6s ease forwards; }
 
+    /* ── Left-eye mode ──────────────────────────────────────────── */
+    body.left-eye .reading-area {
+      justify-content: flex-start;
+    }
+    body.left-eye #rsvp-container {
+      align-items: flex-start;
+      padding-left: 10vw;
+    }
+    #eye-guide {
+      position: absolute;
+      top: 50%;
+      left: calc(10vw + 1.5ch);
+      transform: translate(-50%, -50%);
+      width: 2px;
+      height: 70px;
+      background: linear-gradient(to bottom, transparent, var(--accent), transparent);
+      opacity: 0;
+      pointer-events: none;
+      border-radius: 1px;
+      transition: opacity 0.3s;
+      display: none;
+    }
+    body.left-eye #eye-guide { display: block; opacity: 0.15; }
+
+    /* ── Reading progress bar ────────────────────────────────────── */
+    .reading-area { position: relative; }
+    #reading-progress {
+      position: absolute;
+      bottom: 0; left: 0;
+      height: 2px;
+      width: 0%;
+      background: var(--accent);
+      opacity: 0.45;
+      pointer-events: none;
+      transition: width 0.5s linear;
+    }
+    #reading-overlay {
+      position: absolute;
+      bottom: 14px; right: 18px;
+      display: flex; gap: 10px;
+      font-size: 0.7rem;
+      color: var(--text-3);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+    body.book-loaded #reading-overlay { opacity: 0.55; }
+
+    /* ── Auto-hide controls while playing ────────────────────────── */
+    .top-bar, #reading-overlay { transition: opacity 0.15s; }
+    body.autohide.playing .top-bar { opacity: 0; pointer-events: none; transition: opacity 0.6s; }
+    body.autohide.playing #reading-overlay { opacity: 0; transition: opacity 0.6s; }
+
+    .s-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .s-hint { font-size: 0.7rem; color: var(--text-3); margin-top: 6px; line-height: 1.4; }
+    .switch {
+      position: relative;
+      width: 42px; height: 24px;
+      border-radius: 12px;
+      background: var(--border);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .switch::after {
+      content: '';
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+    .switch.on { background: var(--accent); }
+    .switch.on::after { transform: translateX(18px); }
+
     /* ── Mobile ──────────────────────────────────────────────────── */
     @media (max-width: 600px) {
       #settings-panel {
@@ -620,6 +725,7 @@
 
 <div id="loading"><div class="spinner"></div><p id="loading-text">Loading…</p></div>
 <div id="drag-overlay">Drop to add book</div>
+<div id="toast"></div>
 
 <input type="file" id="file-input" accept=".epub">
 
@@ -734,6 +840,26 @@
     </div>
   </div>
 
+  <div class="s-sep book-only"></div>
+
+  <!-- Focus position (book-only) -->
+  <div class="s-group book-only">
+    <div class="s-header"><span class="s-label">Focus position</span></div>
+    <div class="mode-toggle">
+      <button class="mode-btn" id="btn-focus-center" onclick="setLeftEye(false)">Center</button>
+      <button class="mode-btn" id="btn-focus-left"   onclick="setLeftEye(true)">Left eye</button>
+    </div>
+  </div>
+
+  <!-- Auto-hide controls (book-only) -->
+  <div class="s-group book-only">
+    <div class="s-row">
+      <span class="s-label">Hide controls while reading</span>
+      <button class="switch" id="autohide-switch" role="switch" aria-checked="true" onclick="toggleAutohide()"></button>
+    </div>
+    <div class="s-hint">Tap the text to pause — controls come back.</div>
+  </div>
+
   <div class="s-sep"></div>
 
   <!-- Theme -->
@@ -747,16 +873,26 @@
   <!-- Sync -->
   <div class="s-group">
     <div class="s-header">
-      <span class="s-label">Sync</span>
+      <span class="s-label">Sync between devices</span>
       <span id="sync-status"></span>
     </div>
-    <input type="password" id="sync-token-input" class="sync-token-input"
-           placeholder="GitHub token (gist scope)"
-           oninput="onSyncTokenChange(this.value)">
-    <div class="sync-hint">
-      Get a token at <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>
-      → New classic token → tick <b>gist</b>. Paste here on every device once.
+    <div class="sync-row">
+      <button class="lib-btn" onclick="exportData()">Export</button>
+      <button class="lib-btn" onclick="importData()">Import</button>
     </div>
+    <div class="sync-hint">
+      Export on one device, Import the code on the other. Moves reading positions and settings — add the book on each device.
+    </div>
+    <details class="sync-advanced">
+      <summary>Auto-sync with GitHub (advanced)</summary>
+      <input type="password" id="sync-token-input" class="sync-token-input"
+             placeholder="Your GitHub token (gist scope)"
+             oninput="onSyncTokenChange(this.value)">
+      <div class="sync-hint">
+        Create one at <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a>
+        → classic token → tick <b>gist</b>. Paste it on each device; it stays on that device only.
+      </div>
+    </details>
   </div>
 </div>
 
@@ -767,6 +903,9 @@
   </div>
 
   <div class="reading-area">
+    <div id="eye-guide"></div>
+    <div id="reading-progress"></div>
+    <div id="reading-overlay"><span id="overlay-wpm"></span><span id="overlay-time"></span></div>
     <div id="rsvp-container">
       <div id="rsvp-context-prev"></div>
       <div id="rsvp-word">
@@ -1068,7 +1207,7 @@ async function backToLibrary() {
     await saveProgress(S.bookId, S.chapterIdx, wordsBefore + S.idx, totalWords);
   }
   clearTimer();
-  S.playing = false;
+  setPlaying(false);
   S.bookId = null;
   el('settings-panel').classList.remove('open');
   document.querySelectorAll('#settings-btn, #lib-settings-btn').forEach(b => b?.classList.remove('active'));
@@ -1094,6 +1233,7 @@ async function loadSample() {
     const dup = existing.find(b => b.title === title);
     if (dup) { el('loading').style.display = 'none'; await openBook(dup.id); return; }
     const book = await addBookToDB(blob, title);
+    await applyPendingProgress(book.id, title);
     await openBook(book.id);
   } catch (err) {
     alert('Could not load sample: ' + err.message);
@@ -1118,6 +1258,7 @@ async function loadFile(file) {
     const dup = existing.find(b => b.title === title);
     if (dup) { el('loading').style.display = 'none'; await openBook(dup.id); return; }
     const book = await addBookToDB(file, title);
+    await applyPendingProgress(book.id, title);
     await openBook(book.id);
   } catch (err) {
     alert('Could not add book: ' + err.message);
@@ -1134,7 +1275,7 @@ function toggleSettings() {
   const panel = el('settings-panel');
   const open = panel.classList.toggle('open');
   document.querySelectorAll('#settings-btn, #lib-settings-btn').forEach(b => b?.classList.toggle('active', open));
-  if (open && S.playing) { clearTimer(); S.playing = false; }
+  if (open && S.playing) { clearTimer(); setPlaying(false); }
 }
 function toggleLibSettings() { toggleSettings(); }
 
@@ -1234,7 +1375,7 @@ function tick() {
       tick();
       return;
     }
-    S.playing = false; return;
+    setPlaying(false); return;
   }
   if (S.mode === 'rsvp') {
     const word = S.words[S.idx];
@@ -1251,7 +1392,7 @@ function tick() {
 
 function togglePlay() {
   if (S.idx >= S.words.length) S.idx = 0;
-  S.playing = !S.playing;
+  setPlaying(!S.playing);
   if (S.playing) tick(); else { clearTimer(); scheduleSaveProgress(); }
 }
 
@@ -1330,7 +1471,7 @@ function adjChunk(d) {
 }
 
 function setMode(mode) {
-  clearTimer(); S.playing = false; S.mode = mode;
+  clearTimer(); setPlaying(false); S.mode = mode;
   localStorage.setItem('sr-mode', mode);
   el('btn-rsvp').classList.toggle('active',  mode === 'rsvp');
   el('btn-chunk').classList.toggle('active', mode === 'chunk');
@@ -1342,7 +1483,7 @@ function setMode(mode) {
 }
 
 function loadChapter(idx, startWordIdx = 0) {
-  clearTimer(); S.playing = false;
+  clearTimer(); setPlaying(false);
   S.chapterIdx = idx; S.idx = startWordIdx;
   S.words = S.chapters[idx]?.words || [];
   el('chapter-select').value = idx;
@@ -1354,6 +1495,7 @@ function updateRsvpStats() {
   const mins = Math.ceil((S.words.length - S.idx) / S.wpm);
   el('time-remaining').textContent = `~${mins} min`;
   el('word-count').textContent = `${S.idx} / ${S.words.length} words`;
+  updateReadingOverlay();
 }
 
 function onSpeedChange(val) {
@@ -1425,8 +1567,7 @@ function makeStableId(title) {
   return (title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'book';
 }
 
-const DEFAULT_SYNC_TOKEN = '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';
-function getSyncToken() { return localStorage.getItem('sr-gist-token') || DEFAULT_SYNC_TOKEN; }
+function getSyncToken() { return localStorage.getItem('sr-gist-token') || ''; }
 function getGistId()    { return localStorage.getItem('sr-gist-id')    || ''; }
 
 function setSyncStatus(cls, msg) {
@@ -1470,6 +1611,144 @@ async function resolveGistId() {
   return created.id;
 }
 
+function isValidProgress(p) {
+  return !!p && [p.chapterIdx, p.wordIdx, p.totalWords, p.updatedAt].every(n => Number.isInteger(n) && n >= 0);
+}
+
+async function mergeProgress(bookId, rp) {
+  if (!isValidProgress(rp)) return false;
+  const local = await getProgress(bookId);
+  if (local && rp.updatedAt <= local.updatedAt) return false;
+  await dbOp('progress', 'readwrite', os => os.put({
+    bookId,
+    chapterIdx: rp.chapterIdx,
+    wordIdx: rp.wordIdx,
+    totalWords: rp.totalWords,
+    updatedAt: rp.updatedAt
+  }));
+  return true;
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  Sync code (Export / Import)                                             ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+const SYNC_PREFIX = 'SPEEDREAD1.';
+const inRange = (v, min, max) => /^\d+$/.test(v) && +v >= min && +v <= max;
+const SYNC_SETTINGS = {
+  'sr-theme':      v => THEMES.some(t => t.id === v),
+  'sr-font-pt':    v => inRange(v, 12, 120),
+  'sr-wpm':        v => inRange(v, 100, 1000),
+  'sr-chunk-size': v => inRange(v, 1, 10),
+  'sr-mode':       v => v === 'rsvp' || v === 'chunk',
+  'sr-left-eye':   v => v === '' || v === '1',
+  'sr-autohide':   v => v === '0' || v === '1',
+};
+const isValidSid = sid => /^[a-z0-9-]+$/.test(sid);
+
+// Positions for books not yet added on this device; applied when the book is added.
+function getPending() {
+  try { return JSON.parse(localStorage.getItem('sr-pending-progress') || '{}'); } catch { return {}; }
+}
+function setPending(p) { localStorage.setItem('sr-pending-progress', JSON.stringify(p)); }
+
+async function applyPendingProgress(bookId, title) {
+  const pending = getPending();
+  const sid = makeStableId(title);
+  if (!pending[sid]) return;
+  await mergeProgress(bookId, pending[sid]);
+  delete pending[sid];
+  setPending(pending);
+}
+
+async function saveCurrentProgress() {
+  if (!S.bookId) return;
+  clearTimeout(_saveTimer);
+  const totalWords = S.chapters.reduce((sum, ch) => sum + ch.words.length, 0);
+  const wordsBefore = S.chapters.slice(0, S.chapterIdx).reduce((sum, ch) => sum + ch.words.length, 0);
+  await saveProgress(S.bookId, S.chapterIdx, wordsBefore + S.idx, totalWords);
+}
+
+async function exportData() {
+  await saveCurrentProgress();
+  const progress = { ...getPending() };
+  for (const book of await listBooks()) {
+    const p = await getProgress(book.id);
+    if (p) progress[makeStableId(book.title)] = {
+      title: book.title, chapterIdx: p.chapterIdx, wordIdx: p.wordIdx,
+      totalWords: p.totalWords, updatedAt: p.updatedAt
+    };
+  }
+  const settings = {};
+  Object.keys(SYNC_SETTINGS).forEach(k => { const v = localStorage.getItem(k); if (v !== null) settings[k] = v; });
+
+  const code = SYNC_PREFIX + btoa(unescape(encodeURIComponent(JSON.stringify({ v: 1, progress, settings }))));
+  const fallback = () => prompt('Copy this sync code:', code);
+  const copy = () => navigator.clipboard
+    ? navigator.clipboard.writeText(code).then(() => showToast('Sync code copied')).catch(fallback)
+    : fallback();
+  if (navigator.share) {
+    navigator.share({ text: code }).catch(e => { if (e.name !== 'AbortError') copy(); });
+  } else {
+    copy();
+  }
+}
+
+async function importData() {
+  const raw = (prompt('Paste the sync code from your other device:') || '').trim();
+  if (!raw) return;
+  let data;
+  try {
+    if (!raw.startsWith(SYNC_PREFIX)) throw new Error('prefix');
+    data = JSON.parse(decodeURIComponent(escape(atob(raw.slice(SYNC_PREFIX.length)))));
+  } catch {
+    alert('That doesn’t look like a SpeedRead sync code.');
+    return;
+  }
+
+  await saveCurrentProgress();
+  const books = await listBooks();
+  const pending = getPending();
+  let updated = 0, waiting = 0;
+  for (const [sid, rp] of Object.entries(data.progress || {})) {
+    if (!isValidSid(sid) || !isValidProgress(rp)) continue;
+    const book = books.find(b => makeStableId(b.title) === sid);
+    if (book) {
+      if (await mergeProgress(book.id, rp)) updated++;
+    } else {
+      if (!pending[sid] || rp.updatedAt > pending[sid].updatedAt) {
+        pending[sid] = {
+          title: String(rp.title || '').slice(0, 200), chapterIdx: rp.chapterIdx,
+          wordIdx: rp.wordIdx, totalWords: rp.totalWords, updatedAt: rp.updatedAt
+        };
+      }
+      waiting++;
+    }
+  }
+  setPending(pending);
+  Object.entries(data.settings || {}).forEach(([k, v]) => {
+    if (Object.hasOwn(SYNC_SETTINGS, k) && typeof v === 'string' && SYNC_SETTINGS[k](v)) localStorage.setItem(k, v);
+  });
+
+  let msg = updated ? `Updated reading position in ${updated} book${updated > 1 ? 's' : ''}.` : 'Your positions here were already up to date.';
+  if (waiting) msg += `\n${waiting} book${waiting > 1 ? 's aren’t' : ' isn’t'} on this device yet — the position will apply when you add ${waiting > 1 ? 'them' : 'it'}.`;
+  alert(msg);
+
+  // Stop pagehide from re-saving the old in-memory position over the import.
+  S.bookId = null;
+  clearTimer();
+  location.reload();
+}
+
+let _toastTimer = null;
+function showToast(msg) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
 async function pullFromGist() {
   if (!getSyncToken()) return;
   try {
@@ -1480,17 +1759,7 @@ async function pullFromGist() {
     const books  = await listBooks();
     for (const [sid, rp] of Object.entries(remote)) {
       const book = books.find(b => makeStableId(b.title) === sid);
-      if (!book) continue;
-      const local = await getProgress(book.id);
-      if (!local || rp.updatedAt > local.updatedAt) {
-        await dbOp('progress', 'readwrite', os => os.put({
-          bookId: book.id,
-          chapterIdx: rp.chapterIdx,
-          wordIdx: rp.wordIdx,
-          totalWords: rp.totalWords,
-          updatedAt: rp.updatedAt
-        }));
-      }
+      if (book) await mergeProgress(book.id, rp);
     }
     setSyncStatus('ok', 'Synced ' + timeAgo(Date.now()));
     localStorage.setItem('sr-last-sync', Date.now());
@@ -1598,6 +1867,48 @@ window.addEventListener('pagehide', () => {
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  Init                                                                    ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
+
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  Left Eye + Immersive + Progress overlay                                 ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+let _leftEye = localStorage.getItem('sr-left-eye') === '1';
+let _autohide = localStorage.getItem('sr-autohide') !== '0';
+
+function setLeftEye(on) {
+  _leftEye = on;
+  localStorage.setItem('sr-left-eye', on ? '1' : '');
+  document.body.classList.toggle('left-eye', on);
+  el('btn-focus-center').classList.toggle('active', !on);
+  el('btn-focus-left').classList.toggle('active', on);
+}
+
+function setAutohide(on) {
+  _autohide = on;
+  localStorage.setItem('sr-autohide', on ? '1' : '0');
+  document.body.classList.toggle('autohide', on);
+  el('autohide-switch').classList.toggle('on', on);
+  el('autohide-switch').setAttribute('aria-checked', on);
+}
+function toggleAutohide() { setAutohide(!_autohide); }
+
+function setPlaying(on) {
+  S.playing = on;
+  document.body.classList.toggle('playing', on);
+}
+
+function updateReadingOverlay() {
+  const total = S.words.length;
+  if (!total) return;
+  const pct = (S.idx / total * 100).toFixed(1);
+  el('reading-progress').style.width = pct + '%';
+  const mins = Math.ceil((total - S.idx) / S.wpm);
+  el('overlay-wpm').textContent = S.wpm + ' wpm';
+  el('overlay-time').textContent = '~' + mins + ' min left';
+}
+
+setLeftEye(_leftEye);
+setAutohide(_autohide);
 
 buildThemePicker();
 setTheme(localStorage.getItem('sr-theme') || 'night');
